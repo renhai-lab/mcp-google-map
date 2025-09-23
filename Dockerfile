@@ -14,4 +14,4 @@ RUN npm run build
 
 EXPOSE 3020
 
-CMD [ "node", "dist/cli.js" ]
+CMD [ "node", "dist/cli.js", "--transport=http" ]

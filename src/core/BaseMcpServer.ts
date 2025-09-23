@@ -132,9 +132,10 @@ export class BaseMcpServer {
     // Handle DELETE requests for session termination
     app.delete("/mcp", handleSessionRequest);
 
-    this.httpServer = app.listen(port, () => {
+    // Bind to 0.0.0.0 to allow external connections when running inside Docker
+    this.httpServer = app.listen(port, "0.0.0.0", () => {
       Logger.log(`[${this.serverName}] HTTP server listening on port ${port}`);
-      Logger.log(`[${this.serverName}] MCP endpoint available at http://localhost:${port}/mcp`);
+      Logger.log(`[${this.serverName}] MCP endpoint available at http://0.0.0.0:${port}/mcp`);
     });
   }
 
