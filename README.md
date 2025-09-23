@@ -16,6 +16,7 @@ Special thanks to [@junyinnnn](https://github.com/junyinnnn) for helping add sup
 ## ✅ Testing Status
 
 **This MCP server has been tested and verified to work correctly with:**
+
 - Claude Desktop
 - Dive Desktop
 - MCP protocol implementations
@@ -27,14 +28,17 @@ All tools and features are confirmed functional through real-world testing.
 ### 🗺️ Google Maps Integration
 
 - **Location Search**
+
   - Search for places near a specific location with customizable radius and filters
   - Get detailed place information including ratings, opening hours, and contact details
 
 - **Geocoding Services**
+
   - Convert addresses to coordinates (geocoding)
   - Convert coordinates to addresses (reverse geocoding)
 
 - **Distance & Directions**
+
   - Calculate distances and travel times between multiple origins and destinations
   - Get detailed turn-by-turn directions between two points
   - Support for different travel modes (driving, walking, bicycling, transit)
@@ -51,43 +55,95 @@ All tools and features are confirmed functional through real-world testing.
 
 ## Installation
 
-### 1. via NPM
+> ⚠️ **Important Notice**: This server uses HTTP transport, not stdio. Direct npx usage in MCP Server Settings is **NOT supported**.
+
+### Method 1: Global Installation (Recommended)
 
 ```bash
+# Install globally
 npm install -g @cablate/mcp-google-map
-```
 
-### 2. Run the Server
-
-```bash
-
+# Run the server
 mcp-google-map --port 3000 --apikey "your_api_key_here"
 
 # Using short options
 mcp-google-map -p 3000 -k "your_api_key_here"
-
-# Show help information
-mcp-google-map --help
 ```
 
-### 3. Server Endpoints
+### Method 2: Using npx (Quick Start)
 
-- **Main MCP Endpoint**: `http://localhost:3000/mcp`
-- **Available Tools**: 8 tools including Google Maps services and echo
+> ⚠️ **Warning**: Cannot be used directly in MCP Server Settings with stdio mode
 
-### Environment Variables
+**Step 1: Launch HTTP Server in Terminal**
 
-Alternatively, create a `.env` file in your working directory:
+```bash
+# Run in a separate terminal
+npx @cablate/mcp-google-map --port 3000 --apikey "YOUR_API_KEY"
 
-```env
-# Required
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-
-# Optional
-MCP_SERVER_PORT=3000
+# Or with environment variable
+GOOGLE_MAPS_API_KEY=YOUR_API_KEY npx @cablate/mcp-google-map
 ```
 
-**Note**: Command line options take precedence over environment variables.
+**Step 2: Configure MCP Client to Use HTTP**
+
+```json
+{
+  "mcp-google-map": {
+    "transport": "http",
+    "url": "http://localhost:3000/mcp"
+  }
+}
+```
+
+### ❌ Common Mistake to Avoid
+
+```json
+// This WILL NOT WORK - stdio mode not supported with npx
+{
+  "mcp-google-map": {
+    "command": "npx",
+    "args": ["@cablate/mcp-google-map"]
+  }
+}
+```
+
+### Server Information
+
+- **Endpoint**: `http://localhost:3000/mcp`
+- **Transport**: HTTP (not stdio)
+- **Tools**: 8 Google Maps tools available
+
+### API Key Configuration
+
+API keys can be provided in three ways (priority order):
+
+1. **HTTP Headers** (Highest priority)
+
+   ```json
+   // MCP Client config
+   {
+     "mcp-google-map": {
+       "transport": "streamableHttp",
+       "url": "http://localhost:3000/mcp",
+       // if your MCP Client support 'headers'
+       "headers": {
+         "X-Google-Maps-API-Key": "YOUR_API_KEY" 
+       }
+     }
+   }
+   ```
+
+2. **Command Line**
+
+   ```bash
+   mcp-google-map --apikey YOUR_API_KEY
+   ```
+
+3. **Environment Variable** (.env file or command line)
+   ```env
+   GOOGLE_MAPS_API_KEY=your_api_key_here
+   MCP_SERVER_PORT=3000
+   ```
 
 ## Available Tools
 
@@ -139,7 +195,6 @@ src/
 ├── core/
 │   └── BaseMcpServer.ts     # Base MCP server with streamable HTTP
 └── tools/
-    ├── echo.ts              # Echo service tool
     └── maps/                # Google Maps tools
         ├── toolclass.ts     # Google Maps API client
         ├── searchPlaces.ts  # Maps service layer
@@ -192,14 +247,25 @@ If you have any questions or suggestions, feel free to reach out:
 
 ## Changelog
 
-### v0.0.5
+### v0.0.18 (Latest)
+
+- **Error response improvements**: Now all error messages are in English with more detailed information (previously in Chinese)
+
+### v0.0.17
+
+- **Added HTTP Header Authentication**: Support for passing API keys via `X-Google-Maps-API-Key` header in MCP Client config
+- **Fixed Concurrent User Issues**: Each session now uses its own API key without conflicts
+- **Fixed npx Execution**: Resolved module bundling issues
+- **Improved Documentation**: Clearer setup instructions
+
+### v0.0.14
+
 - Added streamable HTTP transport support
 - Improved CLI interface with emoji indicators
 - Enhanced error handling and logging
 - Added comprehensive tool descriptions for LLM integration
 - Updated to latest MCP SDK version
 
-### v0.0.4
-- Initial release with basic Google Maps integration
-- Support for location search, geocoding, and directions
-- Compatible with MCP protocol
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=cablate/mcp-google-map&type=Date)](https://www.star-history.com/#cablate/mcp-google-map&Date)

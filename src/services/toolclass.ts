@@ -36,13 +36,33 @@ interface GeocodeResult {
   place_id?: string;
 }
 
+/**
+ * Extracts a meaningful error message from various error types
+ * Prioritizes Google Maps API error messages when available
+ */
+function extractErrorMessage(error: any): string {
+  // Extract Google API error message if available
+  const apiError = error?.response?.data?.error_message;
+  const statusCode = error?.response?.status;
+
+  if (apiError) {
+    return `${apiError} (HTTP ${statusCode})`;
+  }
+
+  // Fallback to standard error message
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class GoogleMapsTools {
   private client: Client;
-  private readonly defaultLanguage: Language = Language.zh_TW;
+  private readonly defaultLanguage: Language = Language.en;
+  private apiKey: string;
 
-  constructor() {
+  constructor(apiKey?: string) {
     this.client = new Client({});
-    if (!process.env.GOOGLE_MAPS_API_KEY) {
+    // Use provided API key, or fall back to environment variable
+    this.apiKey = apiKey || process.env.GOOGLE_MAPS_API_KEY || "";
+    if (!this.apiKey) {
       throw new Error("Google Maps API Key is required");
     }
   }
@@ -54,7 +74,7 @@ export class GoogleMapsTools {
       keyword: params.keyword,
       opennow: params.openNow,
       language: this.defaultLanguage,
-      key: process.env.GOOGLE_MAPS_API_KEY || "",
+      key: this.apiKey,
     };
 
     try {
@@ -69,9 +89,9 @@ export class GoogleMapsTools {
       }
 
       return results as PlaceResult[];
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in searchNearbyPlaces:", error);
-      throw new Error("搜尋附近地點時發生錯誤");
+      throw new Error(`Failed to search nearby places: ${extractErrorMessage(error)}`);
     }
   }
 
@@ -82,13 +102,13 @@ export class GoogleMapsTools {
           place_id: placeId,
           fields: ["name", "rating", "formatted_address", "opening_hours", "reviews", "geometry", "formatted_phone_number", "website", "price_level", "photos"],
           language: this.defaultLanguage,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
         },
       });
       return response.data.result;
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in getPlaceDetails:", error);
-      throw new Error("獲取地點詳細資訊時發生錯誤");
+      throw new Error(`Failed to get place details for ${placeId}: ${extractErrorMessage(error)}`);
     }
   }
 
@@ -97,13 +117,13 @@ export class GoogleMapsTools {
       const response = await this.client.geocode({
         params: {
           address: address,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
           language: this.defaultLanguage,
         },
       });
 
       if (response.data.results.length === 0) {
-        throw new Error("找不到該地址的位置");
+        throw new Error(`No location found for address: "${address}"`);
       }
 
       const result = response.data.results[0];
@@ -114,16 +134,16 @@ export class GoogleMapsTools {
         formatted_address: result.formatted_address,
         place_id: result.place_id,
       };
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in geocodeAddress:", error);
-      throw new Error("地址轉換座標時發生錯誤");
+      throw new Error(`Failed to geocode address "${address}": ${extractErrorMessage(error)}`);
     }
   }
 
   private parseCoordinates(coordString: string): GeocodeResult {
     const coords = coordString.split(",").map((c) => parseFloat(c.trim()));
     if (coords.length !== 2 || isNaN(coords[0]) || isNaN(coords[1])) {
-      throw new Error("無效的座標格式，請使用「緯度,經度」格式");
+      throw new Error(`Invalid coordinate format: "${coordString}". Please use "latitude,longitude" format (e.g., "25.033,121.564"`);
     }
     return { lat: coords[0], lng: coords[1] };
   }
@@ -147,9 +167,9 @@ export class GoogleMapsTools {
         formatted_address: result.formatted_address || "",
         place_id: result.place_id || "",
       };
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in geocode:", error);
-      throw new Error("地址轉換座標時發生錯誤");
+      throw new Error(`Failed to geocode address "${address}": ${extractErrorMessage(error)}`);
     }
   }
 
@@ -166,12 +186,12 @@ export class GoogleMapsTools {
         params: {
           latlng: { lat: latitude, lng: longitude },
           language: this.defaultLanguage,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
         },
       });
 
       if (response.data.results.length === 0) {
-        throw new Error("找不到該座標的地址");
+        throw new Error(`No address found for coordinates: (${latitude}, ${longitude})`);
       }
 
       const result = response.data.results[0];
@@ -180,9 +200,9 @@ export class GoogleMapsTools {
         place_id: result.place_id,
         address_components: result.address_components,
       };
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in reverseGeocode:", error);
-      throw new Error("座標轉換地址時發生錯誤");
+      throw new Error(`Failed to reverse geocode coordinates (${latitude}, ${longitude}): ${extractErrorMessage(error)}`);
     }
   }
 
@@ -203,14 +223,14 @@ export class GoogleMapsTools {
           destinations: destinations,
           mode: mode as TravelMode,
           language: this.defaultLanguage,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
         },
       });
 
       const result = response.data;
 
       if (result.status !== "OK") {
-        throw new Error(`距離矩陣計算失敗: ${result.status}`);
+        throw new Error(`Distance matrix calculation failed with status: ${result.status}`);
       }
 
       const distances: any[][] = [];
@@ -246,9 +266,9 @@ export class GoogleMapsTools {
         origin_addresses: result.origin_addresses,
         destination_addresses: result.destination_addresses,
       };
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in calculateDistanceMatrix:", error);
-      throw new Error("計算距離矩陣時發生錯誤");
+      throw new Error(`Failed to calculate distance matrix: ${extractErrorMessage(error)}`);
     }
   }
 
@@ -289,7 +309,7 @@ export class GoogleMapsTools {
           destination: destination,
           mode: mode as TravelMode,
           language: this.defaultLanguage,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
           arrival_time: apiArrivalTime,
           departure_time: apiDepartureTime,
         },
@@ -298,11 +318,11 @@ export class GoogleMapsTools {
       const result = response.data;
 
       if (result.status !== "OK") {
-        throw new Error(`路線指引獲取失敗: ${result.status} (arrival_time: ${apiArrivalTime}, departure_time: ${apiDepartureTime})`);
+        throw new Error(`Failed to get directions with status: ${result.status} (arrival_time: ${apiArrivalTime}, departure_time: ${apiDepartureTime}`);
       }
 
       if (result.routes.length === 0) {
-        throw new Error("找不到路線");
+        throw new Error(`No route found from "${origin}" to "${destination}" with mode: ${mode}`);
       }
 
       const route = result.routes[0];
@@ -340,9 +360,9 @@ export class GoogleMapsTools {
         arrival_time: formatTime(legs.arrival_time),
         departure_time: formatTime(legs.departure_time),
       };
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in getDirections:", error);
-      throw new Error("獲取路線指引時發生錯誤" + error);
+      throw new Error(`Failed to get directions from "${origin}" to "${destination}": ${extractErrorMessage(error)}`);
     }
   }
 
@@ -356,23 +376,23 @@ export class GoogleMapsTools {
       const response = await this.client.elevation({
         params: {
           locations: formattedLocations,
-          key: process.env.GOOGLE_MAPS_API_KEY || "",
+          key: this.apiKey,
         },
       });
 
       const result = response.data;
 
       if (result.status !== "OK") {
-        throw new Error(`海拔數據獲取失敗: ${result.status}`);
+        throw new Error(`Failed to get elevation data with status: ${result.status}`);
       }
 
       return result.results.map((item: any, index: number) => ({
         elevation: item.elevation,
         location: formattedLocations[index],
       }));
-    } catch (error) {
+    } catch (error: any) {
       Logger.error("Error in getElevation:", error);
-      throw new Error("獲取海拔數據時發生錯誤");
+      throw new Error(`Failed to get elevation data for ${locations.length} location(s): ${extractErrorMessage(error)}`);
     }
   }
 }

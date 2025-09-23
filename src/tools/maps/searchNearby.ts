@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlacesSearcher } from "../../services/PlacesSearcher.js";
+import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "search_nearby";
 const DESCRIPTION = "Search for nearby places based on location, with optional filtering by keywords, distance, rating, and operating hours";
@@ -17,18 +18,16 @@ const SCHEMA = {
 
 export type SearchNearbyParams = z.infer<z.ZodObject<typeof SCHEMA>>;
 
-let placesSearcher: PlacesSearcher | null = null;
-
 async function ACTION(params: SearchNearbyParams): Promise<{ content: any[]; isError?: boolean }> {
   try {
-    if (!placesSearcher) {
-      placesSearcher = new PlacesSearcher();
-    }
+    // Create a new PlacesSearcher instance with the current request's API key
+    const apiKey = getCurrentApiKey();
+    const placesSearcher = new PlacesSearcher(apiKey);
     const result = await placesSearcher.searchNearby(params);
 
     if (!result.success) {
       return {
-        content: [{ type: "text", text: result.error || "搜尋失敗" }],
+        content: [{ type: "text", text: result.error || "Search failed" }],
         isError: true,
       };
     }
@@ -46,7 +45,7 @@ async function ACTION(params: SearchNearbyParams): Promise<{ content: any[]; isE
     const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
     return {
       isError: true,
-      content: [{ type: "text", text: `搜尋附近地點錯誤: ${errorMessage}` }],
+      content: [{ type: "text", text: `Error searching nearby places: ${errorMessage}` }],
     };
   }
 }

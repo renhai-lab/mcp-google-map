@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlacesSearcher } from "../../services/PlacesSearcher.js";
+import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_distance_matrix";
 const DESCRIPTION = "Calculate travel distances and durations between multiple origins and destinations for different travel modes";
@@ -12,18 +13,16 @@ const SCHEMA = {
 
 export type DistanceMatrixParams = z.infer<z.ZodObject<typeof SCHEMA>>;
 
-let placesSearcher: PlacesSearcher | null = null;
-
-async function ACTION(params: DistanceMatrixParams): Promise<{ content: any[]; isError?: boolean }> {
+async function ACTION(params: any): Promise<{ content: any[]; isError?: boolean }> {
   try {
-    if (!placesSearcher) {
-      placesSearcher = new PlacesSearcher();
-    }
+    // Create a new PlacesSearcher instance with the current request's API key
+    const apiKey = getCurrentApiKey();
+    const placesSearcher = new PlacesSearcher(apiKey);
     const result = await placesSearcher.calculateDistanceMatrix(params.origins, params.destinations, params.mode);
 
     if (!result.success) {
       return {
-        content: [{ type: "text", text: result.error || "計算距離矩陣失敗" }],
+        content: [{ type: "text", text: result.error || "Failed to calculate distance matrix" }],
         isError: true,
       };
     }
@@ -41,7 +40,7 @@ async function ACTION(params: DistanceMatrixParams): Promise<{ content: any[]; i
     const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
     return {
       isError: true,
-      content: [{ type: "text", text: `計算距離矩陣錯誤: ${errorMessage}` }],
+      content: [{ type: "text", text: `Error calculating distance matrix: ${errorMessage}` }],
     };
   }
 }

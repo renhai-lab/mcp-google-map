@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlacesSearcher } from "../../services/PlacesSearcher.js";
+import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_elevation";
 const DESCRIPTION = "Get elevation data (height above sea level) for specific geographic locations";
@@ -13,18 +14,16 @@ const SCHEMA = {
 
 export type ElevationParams = z.infer<z.ZodObject<typeof SCHEMA>>;
 
-let placesSearcher: PlacesSearcher | null = null;
-
-async function ACTION(params: ElevationParams): Promise<{ content: any[]; isError?: boolean }> {
+async function ACTION(params: any): Promise<{ content: any[]; isError?: boolean }> {
   try {
-    if (!placesSearcher) {
-      placesSearcher = new PlacesSearcher();
-    }
+    // Create a new PlacesSearcher instance with the current request's API key
+    const apiKey = getCurrentApiKey();
+    const placesSearcher = new PlacesSearcher(apiKey);
     const result = await placesSearcher.getElevation(params.locations);
 
     if (!result.success) {
       return {
-        content: [{ type: "text", text: result.error || "獲取海拔數據失敗" }],
+        content: [{ type: "text", text: result.error || "Failed to get elevation data" }],
         isError: true,
       };
     }
@@ -42,7 +41,7 @@ async function ACTION(params: ElevationParams): Promise<{ content: any[]; isErro
     const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
     return {
       isError: true,
-      content: [{ type: "text", text: `獲取海拔數據錯誤: ${errorMessage}` }],
+      content: [{ type: "text", text: `Error getting elevation data: ${errorMessage}` }],
     };
   }
 }

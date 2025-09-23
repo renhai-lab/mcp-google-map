@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlacesSearcher } from "../../services/PlacesSearcher.js";
+import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_directions";
 const DESCRIPTION = "Get detailed turn-by-turn navigation directions between two locations with route information";
@@ -14,13 +15,11 @@ const SCHEMA = {
 
 export type DirectionsParams = z.infer<z.ZodObject<typeof SCHEMA>>;
 
-let placesSearcher: PlacesSearcher | null = null;
-
-async function ACTION(params: DirectionsParams): Promise<{ content: any[]; isError?: boolean }> {
+async function ACTION(params: any): Promise<{ content: any[]; isError?: boolean }> {
   try {
-    if (!placesSearcher) {
-      placesSearcher = new PlacesSearcher();
-    }
+    // Create a new PlacesSearcher instance with the current request's API key
+    const apiKey = getCurrentApiKey();
+    const placesSearcher = new PlacesSearcher(apiKey);
     const result = await placesSearcher.getDirections(
       params.origin,
       params.destination,
@@ -31,7 +30,7 @@ async function ACTION(params: DirectionsParams): Promise<{ content: any[]; isErr
 
     if (!result.success) {
       return {
-        content: [{ type: "text", text: result.error || "獲取路線指引失敗" }],
+        content: [{ type: "text", text: result.error || "Failed to get directions" }],
         isError: true,
       };
     }
@@ -49,7 +48,7 @@ async function ACTION(params: DirectionsParams): Promise<{ content: any[]; isErr
     const errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
     return {
       isError: true,
-      content: [{ type: "text", text: `獲取路線指引錯誤: ${errorMessage}` }],
+      content: [{ type: "text", text: `Error getting directions: ${errorMessage}` }],
     };
   }
 }
