@@ -6,6 +6,16 @@
 
 # MCP Google Map Server
 
+---
+
+> **📢 Important Notice**
+>
+> Google officially announced MCP support for Google Maps on December 10, 2025, introducing **[Maps Grounding Lite](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services)** - a fully-managed MCP server for geospatial data and routing.
+>
+> This community project remains actively maintained as an alternative with different features and deployment options.
+
+---
+
 A powerful Model Context Protocol (MCP) server providing comprehensive Google Maps API integration with streamable HTTP transport support and LLM processing capabilities.
 
 ## 🙌 Special Thanks
@@ -24,6 +34,11 @@ Special thanks to [@junyinnnn](https://github.com/junyinnnn) for helping add sup
 All tools and features are confirmed functional through real-world testing.
 
 ## Features
+
+### 🆕 Latest Updates
+
+ - ℹ️  **Reminder: enable Places API (New) in https://console.cloud.google.com before using the new Place features.**
+
 
 ### 🗺️ Google Maps Integration
 
@@ -247,7 +262,11 @@ If you have any questions or suggestions, feel free to reach out:
 
 ## Changelog
 
-### v0.0.18 (Latest)
+### v0.0.19 (Latest)
+
+- **New Places API Integration**: Updated to use Google's new Places API (New) instead of the legacy API to resolve HTTP 403 errors and ensure continued functionality.
+
+### v0.0.18
 
 - **Error response improvements**: Now all error messages are in English with more detailed information (previously in Chinese)
 
