@@ -3,12 +3,16 @@ import { PlacesSearcher } from "../../services/PlacesSearcher.js";
 import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_directions";
-const DESCRIPTION = "Get detailed turn-by-turn navigation directions between two locations with route information";
+const DESCRIPTION =
+  "Get step-by-step navigation directions between two points with route details. Use when the user asks 'how do I get from A to B?' and needs the route summary, total distance, estimated travel time, or turn-by-turn instructions. Supports departure/arrival times and multiple travel modes.";
 
 const SCHEMA = {
   origin: z.string().describe("Starting point address or coordinates"),
   destination: z.string().describe("Destination address or coordinates"),
-  mode: z.enum(["driving", "walking", "bicycling", "transit"]).default("driving").describe("Travel mode for directions"),
+  mode: z
+    .enum(["driving", "walking", "bicycling", "transit"])
+    .default("driving")
+    .describe("Travel mode for directions"),
   departure_time: z.string().optional().describe("Departure time (ISO string format)"),
   arrival_time: z.string().optional().describe("Arrival time (ISO string format)"),
 };

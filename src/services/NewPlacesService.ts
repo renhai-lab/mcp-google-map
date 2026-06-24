@@ -3,15 +3,195 @@ import { Logger } from "../index.js";
 
 export class NewPlacesService {
   private client: PlacesClient;
+  private readonly apiKey: string;
   private readonly defaultLanguage: string = "en";
-  private readonly placeFieldMask: string = ["displayName", "name", "id", "formattedAddress", "location", "utcOffsetMinutes", "regularOpeningHours.periods", "regularOpeningHours.weekdayDescriptions", "currentOpeningHours.openNow", "nationalPhoneNumber", "websiteUri", "priceLevel", "rating", "userRatingCount", "reviews.rating", "reviews.text", "reviews.publishTime", "reviews.authorAttribution.displayName", "photos.heightPx", "photos.widthPx", "photos.name"].join(",");
-  constructor(apiKey?: string) {
-    this.client = new PlacesClient({
-      apiKey: apiKey || process.env.GOOGLE_MAPS_API_KEY || "",
-    });
+  private readonly placeFieldMask: string = [
+    "displayName",
+    "name",
+    "id",
+    "formattedAddress",
+    "location",
+    "utcOffsetMinutes",
+    "primaryType",
+    "types",
+    "regularOpeningHours.periods",
+    "regularOpeningHours.weekdayDescriptions",
+    "currentOpeningHours.openNow",
+    "nationalPhoneNumber",
+    "websiteUri",
+    "priceLevel",
+    "rating",
+    "userRatingCount",
+    "editorialSummary",
+    "reviews.rating",
+    "reviews.text",
+    "reviews.publishTime",
+    "reviews.authorAttribution.displayName",
+    "photos.heightPx",
+    "photos.widthPx",
+    "photos.name",
+    // Parking & Accessibility
+    "parkingOptions",
+    "accessibilityOptions",
+    // Food & Drink
+    "servesVegetarianFood",
+    "servesBeer",
+    "servesWine",
+    "servesCocktails",
+    "servesBreakfast",
+    "servesLunch",
+    "servesDinner",
+    "servesBrunch",
+    "servesCoffee",
+    "servesDessert",
+    // Dining options
+    "dineIn",
+    "delivery",
+    "takeout",
+    "curbsidePickup",
+    "reservable",
+    // Atmosphere
+    "goodForGroups",
+    "goodForChildren",
+    "goodForWatchingSports",
+    "liveMusic",
+    "outdoorSeating",
+    "allowsDogs",
+    "menuForChildren",
+    "restroom",
+    // Payment
+    "paymentOptions",
+    // AI Summaries (region-limited)
+    "reviewSummary",
+    "generativeSummary",
+  ].join(",");
 
-    if (!apiKey && !process.env.GOOGLE_MAPS_API_KEY) {
+  private readonly searchNearbyFieldMask: string = [
+    "places.displayName",
+    "places.name",
+    "places.id",
+    "places.formattedAddress",
+    "places.location",
+    "places.rating",
+    "places.userRatingCount",
+    "places.currentOpeningHours.openNow",
+    "places.primaryType",
+    "places.priceLevel",
+  ].join(",");
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || process.env.GOOGLE_MAPS_API_KEY || "";
+    this.client = new PlacesClient({ apiKey: this.apiKey });
+
+    if (!this.apiKey) {
       throw new Error("Google Maps API Key is required");
+    }
+  }
+
+  async searchNearby(params: {
+    location: { lat: number; lng: number };
+    keyword?: string;
+    radius?: number;
+    maxResultCount?: number;
+  }): Promise<any[]> {
+    try {
+      const request: any = {
+        locationRestriction: {
+          circle: {
+            center: {
+              latitude: params.location.lat,
+              longitude: params.location.lng,
+            },
+            radius: params.radius || 1000,
+          },
+        },
+        maxResultCount: Math.min(params.maxResultCount || 20, 20),
+        languageCode: this.defaultLanguage,
+      };
+
+      if (params.keyword) {
+        request.includedTypes = [params.keyword];
+      }
+
+      const [response] = await this.client.searchNearby(request, {
+        otherArgs: {
+          headers: {
+            "X-Goog-FieldMask": this.searchNearbyFieldMask,
+          },
+        },
+      });
+
+      return (response.places || []).map((place: any) => this.transformSearchResult(place));
+    } catch (error: any) {
+      Logger.error("Error in searchNearby (New API):", error);
+      throw new Error(`Failed to search nearby places: ${this.extractErrorMessage(error)}`);
+    }
+  }
+
+  async searchText(params: {
+    textQuery: string;
+    locationBias?: { lat: number; lng: number; radius?: number };
+    openNow?: boolean;
+    minRating?: number;
+    includedType?: string;
+    maxResultCount?: number;
+  }): Promise<any[]> {
+    try {
+      const request: any = {
+        textQuery: params.textQuery,
+        languageCode: this.defaultLanguage,
+        maxResultCount: Math.min(params.maxResultCount || 10, 20),
+      };
+
+      if (params.locationBias) {
+        request.locationBias = {
+          circle: {
+            center: {
+              latitude: params.locationBias.lat,
+              longitude: params.locationBias.lng,
+            },
+            radius: params.locationBias.radius || 5000,
+          },
+        };
+      }
+
+      if (params.openNow) {
+        request.openNow = true;
+      }
+
+      if (params.minRating) {
+        request.minRating = params.minRating;
+      }
+
+      if (params.includedType) {
+        request.includedType = params.includedType;
+      }
+
+      const [response] = await this.client.searchText(request, {
+        otherArgs: {
+          headers: {
+            "X-Goog-FieldMask": this.searchNearbyFieldMask,
+          },
+        },
+      });
+
+      return (response.places || []).map((place: any) => this.transformSearchResult(place));
+    } catch (error: any) {
+      Logger.error("Error in searchText (New API):", error);
+      throw new Error(`Failed to search places: ${this.extractErrorMessage(error)}`);
+    }
+  }
+
+  async getPhotoUri(photoName: string, maxWidthPx: number = 800): Promise<string> {
+    try {
+      const [response] = await this.client.getPhotoMedia({
+        name: `${photoName}/media`,
+        maxWidthPx,
+        skipHttpRedirect: true,
+      });
+      return response.photoUri || "";
+    } catch (error: any) {
+      Logger.error("Error in getPhotoUri:", error);
+      throw new Error(`Failed to get photo URI: ${this.extractErrorMessage(error)}`);
     }
   }
 
@@ -33,14 +213,125 @@ export class NewPlacesService {
         }
       );
 
-      return this.transformPlaceResponse(place);
+      // Fetch newest reviews via REST (gRPC SDK doesn't support reviews_sort)
+      const newestReviews = await this.fetchNewestReviews(placeId);
+
+      // Merge: relevant (default) + newest, deduplicate by author+time
+      const allReviews = this.mergeReviews(place?.reviews || [], newestReviews);
+      const merged = { ...place, reviews: allReviews };
+
+      return this.transformPlaceResponse(merged);
     } catch (error: any) {
       Logger.error("Error in getPlaceDetails (New API):", error);
       throw new Error(`Failed to get place details for ${placeId}: ${this.extractErrorMessage(error)}`);
     }
   }
 
+  private async fetchNewestReviews(placeId: string): Promise<any[]> {
+    try {
+      // Use Legacy Place Details API which supports reviews_sort=newest
+      // (Places API New does not support this parameter)
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews&reviews_sort=newest&language=${this.defaultLanguage}&key=${this.apiKey}`;
+      const response = await fetch(url);
+      if (!response.ok) return [];
+      const data = await response.json();
+      if (data.status !== "OK") return [];
+      // Transform Legacy format to match New API format for mergeReviews
+      return (data.result?.reviews || []).map((r: any) => ({
+        rating: r.rating,
+        text: { text: r.text || "", languageCode: r.language || null },
+        publishTime: { seconds: r.time },
+        authorAttribution: { displayName: r.author_name || "" },
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  private mergeReviews(relevant: any[], newest: any[]): any[] {
+    const seen = new Set<string>();
+    const merged: any[] = [];
+
+    for (const review of [...relevant, ...newest]) {
+      const author = review?.authorAttribution?.displayName || "";
+      const time = String(review?.publishTime?.seconds || "");
+      const key = `${author}|${time}`;
+      if (!key || key === "|") {
+        merged.push(review);
+        continue;
+      }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(review);
+    }
+
+    return merged;
+  }
+
+  private transformSearchResult(place: any) {
+    return {
+      name: place.displayName?.text || "",
+      place_id: this.extractLegacyPlaceId(place),
+      formatted_address: place.formattedAddress || "",
+      geometry: {
+        location: {
+          lat: place.location?.latitude || 0,
+          lng: place.location?.longitude || 0,
+        },
+      },
+      primary_type: place.primaryType || null,
+      price_level: place.priceLevel || null,
+      rating: place.rating || 0,
+      user_ratings_total: place.userRatingCount || 0,
+      opening_hours: {
+        open_now: place.currentOpeningHours?.openNow ?? null,
+      },
+    };
+  }
+
   private transformPlaceResponse(place: any) {
+    // Build parking info (only include truthy values)
+    const parking = place.parkingOptions
+      ? Object.fromEntries(Object.entries(place.parkingOptions).filter(([, v]) => v === true))
+      : undefined;
+
+    // Build accessibility info (only include truthy values)
+    const accessibility = place.accessibilityOptions
+      ? Object.fromEntries(Object.entries(place.accessibilityOptions).filter(([, v]) => v === true))
+      : undefined;
+
+    // Build dining_options (only include truthy values)
+    const diningOptions: Record<string, boolean> = {};
+    if (place.dineIn) diningOptions.dine_in = true;
+    if (place.delivery) diningOptions.delivery = true;
+    if (place.takeout) diningOptions.takeout = true;
+    if (place.curbsidePickup) diningOptions.curbside_pickup = true;
+    if (place.reservable) diningOptions.reservable = true;
+
+    // Build serves (only include truthy values)
+    const serves: Record<string, boolean> = {};
+    if (place.servesVegetarianFood) serves.vegetarian_food = true;
+    if (place.servesBeer) serves.beer = true;
+    if (place.servesWine) serves.wine = true;
+    if (place.servesCocktails) serves.cocktails = true;
+    if (place.servesBreakfast) serves.breakfast = true;
+    if (place.servesLunch) serves.lunch = true;
+    if (place.servesDinner) serves.dinner = true;
+    if (place.servesBrunch) serves.brunch = true;
+    if (place.servesCoffee) serves.coffee = true;
+    if (place.servesDessert) serves.dessert = true;
+
+    // Build atmosphere (only include truthy values)
+    const atmosphere: Record<string, boolean> = {};
+    if (place.goodForGroups) atmosphere.good_for_groups = true;
+    if (place.goodForChildren) atmosphere.good_for_children = true;
+    if (place.goodForWatchingSports) atmosphere.good_for_watching_sports = true;
+    if (place.liveMusic) atmosphere.live_music = true;
+    if (place.outdoorSeating) atmosphere.outdoor_seating = true;
+    if (place.allowsDogs) atmosphere.allows_dogs = true;
+    if (place.menuForChildren) atmosphere.menu_for_children = true;
+    if (place.restroom) atmosphere.restroom = true;
+
     return {
       name: place.displayName?.text || place.name || "",
       place_id: this.extractLegacyPlaceId(place),
@@ -51,21 +342,43 @@ export class NewPlacesService {
           lng: place.location?.longitude || 0,
         },
       },
+      primary_type: place.primaryType || null,
+      types: place.types || [],
       rating: place.rating || 0,
       user_ratings_total: place.userRatingCount || 0,
       opening_hours: place.regularOpeningHours
         ? {
-            open_now: this.isCurrentlyOpen(place.regularOpeningHours, place.utcOffsetMinutes, place.currentOpeningHours),
+            open_now: this.isCurrentlyOpen(
+              place.regularOpeningHours,
+              place.utcOffsetMinutes,
+              place.currentOpeningHours
+            ),
             weekday_text: this.formatOpeningHours(place.regularOpeningHours),
           }
         : undefined,
       formatted_phone_number: place.nationalPhoneNumber || "",
       website: place.websiteUri || "",
       price_level: place.priceLevel || 0,
+      editorial_summary: place.editorialSummary?.text || null,
+      ...(Object.keys(parking || {}).length > 0 ? { parking } : {}),
+      ...(Object.keys(accessibility || {}).length > 0 ? { accessibility } : {}),
+      ...(Object.keys(diningOptions).length > 0 ? { dining_options: diningOptions } : {}),
+      ...(Object.keys(serves).length > 0 ? { serves } : {}),
+      ...(Object.keys(atmosphere).length > 0 ? { atmosphere } : {}),
+      ...(place.paymentOptions
+        ? {
+            payment_options: Object.fromEntries(
+              Object.entries(place.paymentOptions).filter(([k]) => !k.startsWith("_"))
+            ),
+          }
+        : {}),
+      ...(place.reviewSummary?.text?.text ? { review_summary: place.reviewSummary.text.text } : {}),
+      ...(place.generativeSummary?.overview?.text ? { generative_summary: place.generativeSummary.overview.text } : {}),
       reviews:
         place.reviews?.map((review: any) => ({
           rating: review.rating || 0,
           text: review.text?.text || "",
+          language: review.text?.languageCode || null,
           time: review.publishTime?.seconds || 0,
           author_name: review.authorAttribution?.displayName || "",
         })) || [],
@@ -160,7 +473,7 @@ export class NewPlacesService {
         continue;
       }
 
-      let start = openDay * minutesInDay + openMinutes;
+      const start = openDay * minutesInDay + openMinutes;
       let end: number;
 
       if (closeDay === undefined || closeMinutes === undefined) {
@@ -209,12 +522,16 @@ export class NewPlacesService {
   }
 
   private extractErrorMessage(error: any): string {
-    const apiError = error?.message || error?.details || error?.status;
+    const statusCode = error?.code;
+    const message = error?.message || error?.details;
 
-    if (apiError) {
-      return `${apiError}`;
+    if (statusCode === 7 || statusCode === 403) {
+      return "API key invalid or Places API (New) not enabled. Check: console.cloud.google.com → APIs & Services → Enable 'Places API (New)'";
+    }
+    if (statusCode === 8 || statusCode === 429) {
+      return "API quota exceeded. Wait and retry, or check quota at console.cloud.google.com → Quotas";
     }
 
-    return error instanceof Error ? error.message : String(error);
+    return message || (error instanceof Error ? error.message : String(error));
   }
 }

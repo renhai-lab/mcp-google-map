@@ -1,33 +1,9 @@
-import { Client, Language, TravelMode } from "@googlemaps/google-maps-services-js";
+import { Client, Language } from "@googlemaps/google-maps-services-js";
 import dotenv from "dotenv";
 import { Logger } from "../index.js";
+import { RoutesService } from "./RoutesService.js";
 
 dotenv.config();
-
-interface SearchParams {
-  location: { lat: number; lng: number };
-  radius?: number;
-  keyword?: string;
-  openNow?: boolean;
-  minRating?: number;
-}
-
-interface PlaceResult {
-  name: string;
-  place_id: string;
-  formatted_address?: string;
-  geometry: {
-    location: {
-      lat: number;
-      lng: number;
-    };
-  };
-  rating?: number;
-  user_ratings_total?: number;
-  opening_hours?: {
-    open_now?: boolean;
-  };
-}
 
 interface GeocodeResult {
   lat: number;
@@ -37,19 +13,39 @@ interface GeocodeResult {
 }
 
 /**
- * Extracts a meaningful error message from various error types
- * Prioritizes Google Maps API error messages when available
+ * Extracts a meaningful, actionable error message from Google Maps API errors.
  */
 function extractErrorMessage(error: any): string {
-  // Extract Google API error message if available
-  const apiError = error?.response?.data?.error_message;
   const statusCode = error?.response?.status;
+  const apiError = error?.response?.data?.error_message;
+  const apiStatus = error?.response?.data?.status;
+
+  // Map common HTTP status codes to actionable messages
+  if (statusCode === 403) {
+    return "API key invalid or required API not enabled. Check: console.cloud.google.com → APIs & Services → Enable the relevant API (Places, Geocoding, etc.)";
+  }
+  if (statusCode === 429) {
+    return "API quota exceeded. Wait and retry, or check quota at console.cloud.google.com → Quotas";
+  }
+
+  // Map Google Maps API status codes
+  if (apiStatus === "ZERO_RESULTS") {
+    return "No results found. Try broader search terms or a larger radius.";
+  }
+  if (apiStatus === "OVER_QUERY_LIMIT") {
+    return "API quota exceeded. Wait and retry, or upgrade your billing plan.";
+  }
+  if (apiStatus === "REQUEST_DENIED") {
+    return `Request denied by Google Maps API. ${apiError || "Check your API key and enabled APIs."}`;
+  }
+  if (apiStatus === "INVALID_REQUEST") {
+    return `Invalid request parameters. ${apiError || "Check your input values."}`;
+  }
 
   if (apiError) {
     return `${apiError} (HTTP ${statusCode})`;
   }
 
-  // Fallback to standard error message
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -64,51 +60,6 @@ export class GoogleMapsTools {
     this.apiKey = apiKey || process.env.GOOGLE_MAPS_API_KEY || "";
     if (!this.apiKey) {
       throw new Error("Google Maps API Key is required");
-    }
-  }
-
-  async searchNearbyPlaces(params: SearchParams): Promise<PlaceResult[]> {
-    const searchParams = {
-      location: params.location,
-      radius: params.radius || 1000,
-      keyword: params.keyword,
-      opennow: params.openNow,
-      language: this.defaultLanguage,
-      key: this.apiKey,
-    };
-
-    try {
-      const response = await this.client.placesNearby({
-        params: searchParams,
-      });
-
-      let results = response.data.results;
-
-      if (params.minRating) {
-        results = results.filter((place) => (place.rating || 0) >= (params.minRating || 0));
-      }
-
-      return results as PlaceResult[];
-    } catch (error: any) {
-      Logger.error("Error in searchNearbyPlaces:", error);
-      throw new Error(`Failed to search nearby places: ${extractErrorMessage(error)}`);
-    }
-  }
-
-  async getPlaceDetails(placeId: string) {
-    try {
-      const response = await this.client.placeDetails({
-        params: {
-          place_id: placeId,
-          fields: ["name", "rating", "formatted_address", "opening_hours", "reviews", "geometry", "formatted_phone_number", "website", "price_level", "photos"],
-          language: this.defaultLanguage,
-          key: this.apiKey,
-        },
-      });
-      return response.data.result;
-    } catch (error: any) {
-      Logger.error("Error in getPlaceDetails:", error);
-      throw new Error(`Failed to get place details for ${placeId}: ${extractErrorMessage(error)}`);
     }
   }
 
@@ -143,7 +94,9 @@ export class GoogleMapsTools {
   private parseCoordinates(coordString: string): GeocodeResult {
     const coords = coordString.split(",").map((c) => parseFloat(c.trim()));
     if (coords.length !== 2 || isNaN(coords[0]) || isNaN(coords[1])) {
-      throw new Error(`Invalid coordinate format: "${coordString}". Please use "latitude,longitude" format (e.g., "25.033,121.564"`);
+      throw new Error(
+        `Invalid coordinate format: "${coordString}". Please use "latitude,longitude" format (e.g., "25.033,121.564"`
+      );
     }
     return { lat: coords[0], lng: coords[1] };
   }
@@ -202,171 +155,349 @@ export class GoogleMapsTools {
       };
     } catch (error: any) {
       Logger.error("Error in reverseGeocode:", error);
-      throw new Error(`Failed to reverse geocode coordinates (${latitude}, ${longitude}): ${extractErrorMessage(error)}`);
+      throw new Error(
+        `Failed to reverse geocode coordinates (${latitude}, ${longitude}): ${extractErrorMessage(error)}`
+      );
     }
   }
 
-  async calculateDistanceMatrix(
-    origins: string[],
-    destinations: string[],
-    mode: "driving" | "walking" | "bicycling" | "transit" = "driving"
-  ): Promise<{
-    distances: any[][];
-    durations: any[][];
-    origin_addresses: string[];
-    destination_addresses: string[];
-  }> {
+  async searchAlongRoute(params: {
+    textQuery: string;
+    origin: string;
+    destination: string;
+    mode?: string;
+    maxResults?: number;
+  }): Promise<{ places: any[]; route: { distance: string; duration: string; polyline: string } }> {
     try {
-      const response = await this.client.distancematrix({
-        params: {
-          origins: origins,
-          destinations: destinations,
-          mode: mode as TravelMode,
-          language: this.defaultLanguage,
-          key: this.apiKey,
-        },
+      // Step 1: Get directions via Routes API to obtain the encoded polyline
+      const routesService = new RoutesService(this.apiKey);
+      const directions = await routesService.computeRoutes({
+        origin: params.origin,
+        destination: params.destination,
+        mode: params.mode || "walking",
       });
 
-      const result = response.data;
-
-      if (result.status !== "OK") {
-        throw new Error(`Distance matrix calculation failed with status: ${result.status}`);
+      const polyline = directions.routes[0]?.polyline?.encodedPolyline;
+      if (!polyline) {
+        throw new Error("Could not get route polyline");
       }
 
-      const distances: any[][] = [];
-      const durations: any[][] = [];
+      // Step 2: Call Places searchText REST API with searchAlongRouteParameters
+      const maxResults = Math.min(params.maxResults || 5, 20);
+      const fieldMask =
+        "places.displayName,places.id,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.currentOpeningHours.openNow";
 
-      result.rows.forEach((row: any) => {
-        const distanceRow: any[] = [];
-        const durationRow: any[] = [];
-
-        row.elements.forEach((element: any) => {
-          if (element.status === "OK") {
-            distanceRow.push({
-              value: element.distance.value,
-              text: element.distance.text,
-            });
-            durationRow.push({
-              value: element.duration.value,
-              text: element.duration.text,
-            });
-          } else {
-            distanceRow.push(null);
-            durationRow.push(null);
-          }
-        });
-
-        distances.push(distanceRow);
-        durations.push(durationRow);
+      const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": this.apiKey,
+          "X-Goog-FieldMask": fieldMask,
+        },
+        body: JSON.stringify({
+          textQuery: params.textQuery,
+          searchAlongRouteParameters: {
+            polyline: {
+              encodedPolyline: polyline,
+            },
+          },
+          maxResultCount: maxResults,
+        }),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData?.error?.message || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const places = (data.places || []).map((place: any) => ({
+        name: place.displayName?.text || "",
+        place_id: place.id || "",
+        formatted_address: place.formattedAddress || "",
+        location: {
+          lat: place.location?.latitude || 0,
+          lng: place.location?.longitude || 0,
+        },
+        rating: place.rating || 0,
+        user_ratings_total: place.userRatingCount || 0,
+        open_now: place.currentOpeningHours?.openNow ?? null,
+      }));
 
       return {
-        distances: distances,
-        durations: durations,
-        origin_addresses: result.origin_addresses,
-        destination_addresses: result.destination_addresses,
+        places,
+        route: {
+          distance: directions.total_distance.text,
+          duration: directions.total_duration.text,
+          polyline,
+        },
       };
     } catch (error: any) {
-      Logger.error("Error in calculateDistanceMatrix:", error);
-      throw new Error(`Failed to calculate distance matrix: ${extractErrorMessage(error)}`);
+      Logger.error("Error in searchAlongRoute:", error);
+      throw new Error(error.message || "Failed to search along route");
     }
   }
 
-  async getDirections(
-    origin: string,
-    destination: string,
-    mode: "driving" | "walking" | "bicycling" | "transit" = "driving",
-    departure_time?: Date,
-    arrival_time?: Date
-  ): Promise<{
-    routes: any[];
-    summary: string;
-    total_distance: { value: number; text: string };
-    total_duration: { value: number; text: string };
-    arrival_time: string;
-    departure_time: string;
-  }> {
+  async getWeather(
+    latitude: number,
+    longitude: number,
+    type: "current" | "forecast_daily" | "forecast_hourly" = "current",
+    forecastDays?: number,
+    forecastHours?: number
+  ): Promise<any> {
     try {
-      let apiArrivalTime: number | undefined = undefined;
-      if (arrival_time) {
-        apiArrivalTime = Math.floor(arrival_time.getTime() / 1000);
-      }
+      const baseParams = `key=${this.apiKey}&location.latitude=${latitude}&location.longitude=${longitude}`;
+      let url: string;
 
-      let apiDepartureTime: number | "now" | undefined = undefined;
-      if (!apiArrivalTime) {
-        if (departure_time instanceof Date) {
-          apiDepartureTime = Math.floor(departure_time.getTime() / 1000);
-        } else if (departure_time) {
-          apiDepartureTime = departure_time as unknown as "now";
-        } else {
-          apiDepartureTime = "now";
+      switch (type) {
+        case "forecast_daily": {
+          const days = Math.min(Math.max(forecastDays || 5, 1), 10);
+          url = `https://weather.googleapis.com/v1/forecast/days:lookup?${baseParams}&days=${days}`;
+          break;
         }
+        case "forecast_hourly": {
+          const hours = Math.min(Math.max(forecastHours || 24, 1), 240);
+          url = `https://weather.googleapis.com/v1/forecast/hours:lookup?${baseParams}&hours=${hours}`;
+          break;
+        }
+        default:
+          url = `https://weather.googleapis.com/v1/currentConditions:lookup?${baseParams}`;
       }
 
-      const response = await this.client.directions({
-        params: {
-          origin: origin,
-          destination: destination,
-          mode: mode as TravelMode,
-          language: this.defaultLanguage,
-          key: this.apiKey,
-          arrival_time: apiArrivalTime,
-          departure_time: apiDepartureTime,
-        },
-      });
+      const response = await fetch(url);
 
-      const result = response.data;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const msg = errorData?.error?.message || `HTTP ${response.status}`;
 
-      if (result.status !== "OK") {
-        throw new Error(`Failed to get directions with status: ${result.status} (arrival_time: ${apiArrivalTime}, departure_time: ${apiDepartureTime}`);
+        if (msg.includes("not supported for this location")) {
+          throw new Error(
+            `Weather data is not available for this location (${latitude}, ${longitude}). ` +
+              "The Google Weather API has limited coverage — China, Japan, South Korea, Cuba, Iran, North Korea, and Syria are unsupported. " +
+              "Try a location in North America, Europe, or Oceania."
+          );
+        }
+
+        throw new Error(msg);
       }
 
-      if (result.routes.length === 0) {
-        throw new Error(`No route found from "${origin}" to "${destination}" with mode: ${mode}`);
-      }
+      const data = await response.json();
 
-      const route = result.routes[0];
-      const legs = route.legs[0];
-
-      const formatTime = (timeInfo: any) => {
-        if (!timeInfo || typeof timeInfo.value !== "number") return "";
-        const date = new Date(timeInfo.value * 1000);
-        const options: Intl.DateTimeFormatOptions = {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
+      if (type === "current") {
+        return {
+          temperature: data.temperature,
+          feelsLike: data.feelsLikeTemperature,
+          humidity: data.relativeHumidity,
+          wind: data.wind,
+          conditions: data.weatherCondition?.description?.text || data.weatherCondition?.type,
+          uvIndex: data.uvIndex,
+          precipitation: data.precipitation,
+          visibility: data.visibility,
+          pressure: data.airPressure,
+          cloudCover: data.cloudCover,
+          isDayTime: data.isDaytime,
         };
-        if (timeInfo.time_zone && typeof timeInfo.time_zone === "string") {
-          options.timeZone = timeInfo.time_zone;
-        }
-        return date.toLocaleString(this.defaultLanguage.toString(), options);
-      };
+      }
 
-      return {
-        routes: result.routes,
-        summary: route.summary,
-        total_distance: {
-          value: legs.distance.value,
-          text: legs.distance.text,
-        },
-        total_duration: {
-          value: legs.duration.value,
-          text: legs.duration.text,
-        },
-        arrival_time: formatTime(legs.arrival_time),
-        departure_time: formatTime(legs.departure_time),
-      };
+      // forecast_daily or forecast_hourly — return as-is with light cleanup
+      return data;
     } catch (error: any) {
-      Logger.error("Error in getDirections:", error);
-      throw new Error(`Failed to get directions from "${origin}" to "${destination}": ${extractErrorMessage(error)}`);
+      Logger.error("Error in getWeather:", error);
+      throw new Error(error.message || `Failed to get weather for (${latitude}, ${longitude})`);
     }
   }
 
-  async getElevation(locations: Array<{ latitude: number; longitude: number }>): Promise<Array<{ elevation: number; location: { lat: number; lng: number } }>> {
+  async getAirQuality(
+    latitude: number,
+    longitude: number,
+    includeHealthRecommendations: boolean = true,
+    includePollutants: boolean = false
+  ): Promise<any> {
+    try {
+      const url = `https://airquality.googleapis.com/v1/currentConditions:lookup?key=${this.apiKey}`;
+
+      const extraComputations: string[] = [];
+      if (includeHealthRecommendations) {
+        extraComputations.push("HEALTH_RECOMMENDATIONS");
+      }
+      if (includePollutants) {
+        extraComputations.push("POLLUTANT_CONCENTRATION");
+      }
+
+      const body: any = {
+        location: { latitude, longitude },
+      };
+      if (extraComputations.length > 0) {
+        body.extraComputations = extraComputations;
+      }
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const msg = errorData?.error?.message || `HTTP ${response.status}`;
+        throw new Error(msg);
+      }
+
+      const data = await response.json();
+
+      // Extract the primary index
+      const indexes = data.indexes || [];
+      const primaryIndex = indexes[0];
+
+      const result: any = {
+        dateTime: data.dateTime,
+        regionCode: data.regionCode,
+        aqi: primaryIndex?.aqi,
+        category: primaryIndex?.category,
+        dominantPollutant: primaryIndex?.dominantPollutant,
+        color: primaryIndex?.color,
+      };
+
+      // Include all available indexes (universal + local)
+      if (indexes.length > 1) {
+        result.indexes = indexes.map((idx: any) => ({
+          code: idx.code,
+          displayName: idx.displayName,
+          aqi: idx.aqi,
+          category: idx.category,
+          dominantPollutant: idx.dominantPollutant,
+        }));
+      }
+
+      // Health recommendations
+      if (data.healthRecommendations) {
+        result.healthRecommendations = data.healthRecommendations;
+      }
+
+      // Pollutants
+      if (data.pollutants) {
+        result.pollutants = data.pollutants.map((p: any) => ({
+          code: p.code,
+          displayName: p.displayName,
+          concentration: p.concentration,
+          additionalInfo: p.additionalInfo,
+        }));
+      }
+
+      return result;
+    } catch (error: any) {
+      Logger.error("Error in getAirQuality:", error);
+      throw new Error(error.message || `Failed to get air quality for (${latitude}, ${longitude})`);
+    }
+  }
+
+  async getStaticMap(params: {
+    center?: string;
+    zoom?: number;
+    size?: string;
+    maptype?: string;
+    markers?: string[];
+    path?: string[];
+  }): Promise<{ base64: string; size: number; dimensions: string }> {
+    try {
+      const dimensions = params.size || "600x400";
+      const queryParts: string[] = [
+        `key=${this.apiKey}`,
+        `size=${dimensions}`,
+        `maptype=${params.maptype || "roadmap"}`,
+      ];
+
+      if (params.center) {
+        queryParts.push(`center=${encodeURIComponent(params.center)}`);
+      }
+      if (params.zoom !== undefined) {
+        queryParts.push(`zoom=${params.zoom}`);
+      }
+      if (params.markers) {
+        for (const marker of params.markers) {
+          queryParts.push(`markers=${encodeURIComponent(marker)}`);
+        }
+      }
+      if (params.path) {
+        for (const p of params.path) {
+          queryParts.push(`path=${encodeURIComponent(p)}`);
+        }
+      }
+
+      const url = `https://maps.googleapis.com/maps/api/staticmap?${queryParts.join("&")}`;
+
+      // Check URL length limit
+      if (url.length > 16384) {
+        throw new Error(`URL exceeds 16,384 character limit (${url.length}). Reduce markers or path points.`);
+      }
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json") || contentType.includes("text/")) {
+          const errorText = await response.text();
+          throw new Error(`Static Maps API error: ${errorText}`);
+        }
+        throw new Error(`Static Maps API returned HTTP ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const base64 = buffer.toString("base64");
+
+      return {
+        base64,
+        size: buffer.length,
+        dimensions,
+      };
+    } catch (error: any) {
+      Logger.error("Error in getStaticMap:", error);
+      throw new Error(error.message || "Failed to generate static map");
+    }
+  }
+
+  async getTimezone(
+    latitude: number,
+    longitude: number,
+    timestamp?: number
+  ): Promise<{ timeZoneId: string; timeZoneName: string; utcOffset: number; dstOffset: number; localTime: string }> {
+    try {
+      const ts = timestamp ? Math.floor(timestamp / 1000) : Math.floor(Date.now() / 1000);
+
+      const response = await this.client.timezone({
+        params: {
+          location: { lat: latitude, lng: longitude },
+          timestamp: ts,
+          key: this.apiKey,
+        },
+      });
+
+      const result = response.data;
+
+      if (result.status !== "OK") {
+        throw new Error(`Timezone API returned status: ${result.status}`);
+      }
+
+      const totalOffset = (result.rawOffset + result.dstOffset) * 1000;
+      const localTime = new Date(ts * 1000 + totalOffset).toISOString().replace("Z", "");
+
+      return {
+        timeZoneId: result.timeZoneId,
+        timeZoneName: result.timeZoneName,
+        utcOffset: result.rawOffset,
+        dstOffset: result.dstOffset,
+        localTime,
+      };
+    } catch (error: any) {
+      Logger.error("Error in getTimezone:", error);
+      throw new Error(`Failed to get timezone for (${latitude}, ${longitude}): ${extractErrorMessage(error)}`);
+    }
+  }
+
+  async getElevation(
+    locations: Array<{ latitude: number; longitude: number }>
+  ): Promise<Array<{ elevation: number; location: { lat: number; lng: number } }>> {
     try {
       const formattedLocations = locations.map((loc) => ({
         lat: loc.latitude,
@@ -392,7 +523,9 @@ export class GoogleMapsTools {
       }));
     } catch (error: any) {
       Logger.error("Error in getElevation:", error);
-      throw new Error(`Failed to get elevation data for ${locations.length} location(s): ${extractErrorMessage(error)}`);
+      throw new Error(
+        `Failed to get elevation data for ${locations.length} location(s): ${extractErrorMessage(error)}`
+      );
     }
   }
 }

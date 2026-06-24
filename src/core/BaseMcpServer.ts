@@ -1,10 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { isInitializeRequest, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import express, { Request, Response } from "express";
 import { Server } from "http";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { Logger } from "../index.js";
 import { ApiKeyManager } from "../utils/apiKeyManager.js";
 import { runWithContext } from "../utils/requestContext.js";
@@ -15,8 +17,9 @@ const VERSION = "0.0.1";
 export interface ToolConfig {
   name: string;
   description: string;
-  schema: any; // Adjust type as per actual SDK (e.g., ZodSchema)
-  action: (params: any) => Promise<any>; // Adjust type for params and return
+  schema: Record<string, z.ZodTypeAny>;
+  annotations?: ToolAnnotations;
+  action: (params: any) => Promise<any>;
 }
 
 export interface SessionContext {
@@ -29,29 +32,31 @@ export class BaseMcpServer {
   private sessions: { [sessionId: string]: SessionContext } = {};
   private httpServer: Server | null = null;
   private serverName: string;
+  private tools: ToolConfig[];
 
   constructor(name: string, tools: ToolConfig[]) {
     this.serverName = name;
-    this.server = new McpServer(
-      {
-        name: this.serverName,
-        version: VERSION,
-      },
-      {
-        capabilities: {
-          logging: {},
-          tools: {},
-        },
-      }
-    );
-
-    this.registerTools(tools);
+    this.tools = tools;
+    this.server = this.createMcpServer();
   }
 
-  private registerTools(tools: ToolConfig[]): void {
-    tools.forEach((tool) => {
-      this.server.tool(tool.name, tool.description, tool.schema, async (params: any) => tool.action(params));
+  private createMcpServer(): McpServer {
+    const server = new McpServer(
+      { name: this.serverName, version: VERSION },
+      { capabilities: { logging: {}, tools: {} } }
+    );
+    this.tools.forEach((tool) => {
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: z.object(tool.schema),
+          annotations: tool.annotations,
+        },
+        async (params: any) => tool.action(params)
+      );
     });
+    return server;
   }
 
   async connect(transport: Transport): Promise<void> {
@@ -69,7 +74,7 @@ export class BaseMcpServer {
     Logger.log(`${this.serverName} connected and ready to process requests`);
   }
 
-  async startHttpServer(port: number): Promise<void> {
+  async startHttpServer(port: number, host: string = "0.0.0.0"): Promise<void> {
     const app = express();
     app.use(express.json());
 
@@ -82,7 +87,7 @@ export class BaseMcpServer {
       const apiKeyManager = ApiKeyManager.getInstance();
       const requestApiKey = apiKeyManager.getApiKey(req);
 
-      Logger.log(`${this.serverName} Get API KEY: ${requestApiKey}`)
+      Logger.log(`${this.serverName} API key received from request context`);
 
       if (sessionId && this.sessions[sessionId]) {
         // Reuse existing session
@@ -108,7 +113,7 @@ export class BaseMcpServer {
         // Create session context
         context = {
           transport,
-          apiKey: requestApiKey
+          apiKey: requestApiKey,
         };
 
         // Clean up transport when closed
@@ -119,7 +124,8 @@ export class BaseMcpServer {
           }
         };
 
-        await this.server.connect(transport);
+        const sessionServer = this.createMcpServer();
+        await sessionServer.connect(transport);
       } else {
         // Invalid request
         res.status(400).json({
@@ -134,12 +140,9 @@ export class BaseMcpServer {
       }
 
       // Run the request handler with the API key in context
-      await runWithContext(
-        { apiKey: context.apiKey, sessionId },
-        async () => {
-          await context.transport.handleRequest(req, res, req.body);
-        }
-      );
+      await runWithContext({ apiKey: context.apiKey, sessionId }, async () => {
+        await context.transport.handleRequest(req, res, req.body);
+      });
     });
 
     // Reusable handler for GET and DELETE requests
@@ -160,12 +163,9 @@ export class BaseMcpServer {
       }
 
       // Run the request handler with the API key in context
-      await runWithContext(
-        { apiKey: context.apiKey, sessionId },
-        async () => {
-          await context.transport.handleRequest(req, res);
-        }
-      );
+      await runWithContext({ apiKey: context.apiKey, sessionId }, async () => {
+        await context.transport.handleRequest(req, res);
+      });
     };
 
     // Handle GET requests for server-to-client notifications via SSE
@@ -174,11 +174,23 @@ export class BaseMcpServer {
     // Handle DELETE requests for session termination
     app.delete("/mcp", handleSessionRequest);
 
+<<<<<<< HEAD
     // Bind to 0.0.0.0 to allow external connections when running inside Docker
     this.httpServer = app.listen(port, "0.0.0.0", () => {
       Logger.log(`[${this.serverName}] HTTP server listening on port ${port}`);
       Logger.log(`[${this.serverName}] MCP endpoint available at http://0.0.0.0:${port}/mcp`);
+=======
+    const displayHost = host === "0.0.0.0" ? "localhost" : host;
+    this.httpServer = app.listen(port, host, () => {
+      Logger.log(`[${this.serverName}] HTTP server listening on ${host}:${port}`);
+      Logger.log(`[${this.serverName}] MCP endpoint available at http://${displayHost}:${port}/mcp`);
+>>>>>>> pr-1
     });
+  }
+
+  async startStdio(): Promise<void> {
+    const transport = new StdioServerTransport();
+    await this.connect(transport);
   }
 
   async stopHttpServer(): Promise<void> {

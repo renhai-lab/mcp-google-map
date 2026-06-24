@@ -3,13 +3,18 @@ import { PlacesSearcher } from "../../services/PlacesSearcher.js";
 import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_elevation";
-const DESCRIPTION = "Get elevation data (height above sea level) for specific geographic locations";
+const DESCRIPTION =
+  "Get elevation (meters above sea level) for geographic coordinates. Use when the user asks 'how high is this place', 'is this area flood-prone', or needs altitude for hiking/cycling route profiles. Also useful for real estate risk assessment — low elevation near water suggests flood risk.";
 
 const SCHEMA = {
-  locations: z.array(z.object({
-    latitude: z.number().describe("Latitude coordinate"),
-    longitude: z.number().describe("Longitude coordinate"),
-  })).describe("List of locations to get elevation data for"),
+  locations: z
+    .array(
+      z.object({
+        latitude: z.number().describe("Latitude coordinate"),
+        longitude: z.number().describe("Longitude coordinate"),
+      })
+    )
+    .describe("List of locations to get elevation data for"),
 };
 
 export type ElevationParams = z.infer<z.ZodObject<typeof SCHEMA>>;

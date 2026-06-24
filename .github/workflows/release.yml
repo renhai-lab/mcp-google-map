@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Skip automated version bump commits
+    if: "!contains(github.event.head_commit.message, 'chore: release')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+
+      - name: E2E Tests
+        run: npm run test:e2e
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+
+      - name: Sync latest from main (pick up previous release commits)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase
+
+      - name: Bump version
+        run: npm version patch --no-git-tag-version
+
+      - name: Update CHANGELOG
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Collect commit messages since last tag
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | grep -v "^- chore: release")
+          else
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges -10 | grep -v "^- chore: release")
+          fi
+
+          # Prepend new version to CHANGELOG.md
+          HEADER="## ${VERSION}"
+          TMPFILE=$(mktemp)
+          echo "# Changelog" > "$TMPFILE"
+          echo "" >> "$TMPFILE"
+          echo "$HEADER" >> "$TMPFILE"
+          echo "" >> "$TMPFILE"
+          echo "$COMMITS" >> "$TMPFILE"
+          echo "" >> "$TMPFILE"
+          # Append existing content (skip the first "# Changelog" line)
+          tail -n +2 CHANGELOG.md >> "$TMPFILE"
+          mv "$TMPFILE" CHANGELOG.md
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Sync server.json version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp && mv server.tmp server.json
+
+      - name: Publish to MCP Registry
+        run: |
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Commit version bump & tag
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git add package.json package-lock.json CHANGELOG.md server.json
+          git commit -m "chore: release v${VERSION}"
+          git tag "v${VERSION}"
+          git pull --rebase
+          git push
+          git push --tags
+
+      - name: Create GitHub Release
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log ${PREV_TAG}..v${VERSION} --pretty=format:"- %s" --no-merges | grep -v "^- chore: release")
+          else
+            NOTES="Initial release"
+          fi
+          gh release create "v${VERSION}" --title "v${VERSION}" --notes "$NOTES"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

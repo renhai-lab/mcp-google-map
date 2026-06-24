@@ -3,12 +3,22 @@ import { PlacesSearcher } from "../../services/PlacesSearcher.js";
 import { getCurrentApiKey } from "../../utils/requestContext.js";
 
 const NAME = "maps_distance_matrix";
-const DESCRIPTION = "Calculate travel distances and durations between multiple origins and destinations for different travel modes";
+const DESCRIPTION =
+  "Calculate travel distances and durations between multiple origins and destinations in a single request. Use for comparing travel options — e.g., 'which hotel is closest to the office?' or batch distance calculations. Supports driving, walking, bicycling, and transit modes.";
 
 const SCHEMA = {
   origins: z.array(z.string()).describe("List of origin addresses or coordinates"),
   destinations: z.array(z.string()).describe("List of destination addresses or coordinates"),
-  mode: z.enum(["driving", "walking", "bicycling", "transit"]).default("driving").describe("Travel mode for calculation"),
+  mode: z
+    .enum(["driving", "walking", "bicycling", "transit"])
+    .default("driving")
+    .describe("Travel mode for calculation"),
+  departure_time: z
+    .string()
+    .optional()
+    .describe(
+      "Departure time in ISO 8601 format (e.g. 2026-03-21T09:00:00Z). Enables traffic-aware duration estimates."
+    ),
 };
 
 export type DistanceMatrixParams = z.infer<z.ZodObject<typeof SCHEMA>>;
@@ -18,7 +28,12 @@ async function ACTION(params: any): Promise<{ content: any[]; isError?: boolean 
     // Create a new PlacesSearcher instance with the current request's API key
     const apiKey = getCurrentApiKey();
     const placesSearcher = new PlacesSearcher(apiKey);
-    const result = await placesSearcher.calculateDistanceMatrix(params.origins, params.destinations, params.mode);
+    const result = await placesSearcher.calculateDistanceMatrix(
+      params.origins,
+      params.destinations,
+      params.mode,
+      params.departure_time
+    );
 
     if (!result.success) {
       return {

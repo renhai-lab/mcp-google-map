@@ -1,7 +1,8 @@
 {
   "name": "@cablate/mcp-google-map",
-  "version": "0.0.19",
-  "description": "Google Maps MCP server with streamable HTTP transport support for location services, geocoding, and navigation",
+  "version": "0.0.52",
+  "mcpName": "io.github.cablate/google-map",
+  "description": "18 Google Maps tools for AI agents — geocode, search, directions, weather, air quality, local rank tracking, map images via MCP server or standalone CLI",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -10,12 +11,18 @@
   "files": [
     "dist",
     "dist/**/*.map",
-    "README.md"
+    "README.md",
+    "skills"
   ],
   "scripts": {
     "build": "tsup --dts",
     "start": "node dist/cli.js",
     "dev": "cross-env NODE_ENV=development tsup --watch",
+    "test": "tsx tests/smoke.test.ts",
+    "test:e2e": "tsx tests/smoke.test.ts",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "prepublishOnly": "npm run build"
   },
   "engines": {
@@ -23,16 +30,21 @@
   },
   "keywords": [
     "google",
+    "google-maps",
     "map",
-    "api",
-    "llm",
-    "typescript",
     "mcp",
-    "server",
-    "streamable",
-    "location",
+    "mcp-server",
+    "model-context-protocol",
+    "agent-skill",
+    "ai-agent",
+    "geospatial",
     "geocoding",
-    "navigation"
+    "places",
+    "directions",
+    "navigation",
+    "location",
+    "streamable-http",
+    "typescript"
   ],
   "author": "CabLate",
   "license": "MIT",
@@ -47,16 +59,17 @@
   "dependencies": {
     "@googlemaps/google-maps-services-js": "^3.4.0",
     "@googlemaps/places": "^2.1.0",
-    "@modelcontextprotocol/sdk": "^1.11.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@types/yargs": "^17.0.33",
     "cross-env": "^7.0.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "yargs": "^17.7.2",
-    "zod": "^3.24.2"
+    "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
+    "@eslint/js": "^9.39.4",
+    "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.17.0",
@@ -69,6 +82,7 @@
     "ts-jest": "^29.2.5",
     "tsup": "^8.4.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.57.0"
   }
 }
