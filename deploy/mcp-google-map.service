@@ -1,0 +1,15 @@
+[Unit]
+Description=MCP Google Map Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hncdjzw/mcp-google-map
+EnvironmentFile=/home/hncdjzw/mcp-google-map/.env
+ExecStart=/usr/bin/node /home/hncdjzw/mcp-google-map/dist/cli.js --host 0.0.0.0 --port 3020 --apikey ${GOOGLE_MAPS_API_KEY}
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
